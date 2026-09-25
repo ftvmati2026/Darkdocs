@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { VisualSettings } from '../types';
 import { Footer } from './Footer';
 import { playPageFlipSound, initPageFlipAudio } from '../utils/audio';
@@ -50,14 +51,17 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   const [isPeelAnimating, setIsPeelAnimating] = useState<boolean>(false);
   const [isHoveringCorner, setIsHoveringCorner] = useState<boolean>(false);
 
-  // Drag tracking ref
+  // Drag & Scroll vs Swipe tracking ref
   const dragRef = useRef<{
     startX: number;
     startY: number;
+    startTime: number;
     corner: 'bottom-right' | 'bottom-left';
     targetP: number;
-    startTime: number;
     pointerId: number;
+    status: 'undetermined' | 'scrolling' | 'swiping';
+    isCornerStart: boolean;
+    audioPlayed: boolean;
   } | null>(null);
 
   const animationFrameRef = useRef<number | null>(null);
@@ -330,7 +334,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
       }
 
       // Animate corner curl sweep across the page (Page Peel)
-      animatePeelTo(1.0, 420, () => {
+      animatePeelTo(1.0, 380, () => {
         setPeelProgress(0);
         setTargetPage(null);
         onPageChange(toPage);
@@ -349,10 +353,17 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   );
 
   /**
-   * Touch & Pointer Handlers for Interactive Dragging of the Corner Curl
+   * Strict Scroll vs Swipe Gesture Handlers
+   * - Keeps central reading zone free for vertical scroll
+   * - Blocks page turn if Math.abs(deltaY) > Math.abs(deltaX)
+   * - Requires Math.abs(deltaX) > 60px with clear horizontal angle to turn page
    */
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!pdfDoc || isPeelAnimating || pdfDoc.numPages <= 1) return;
+
+    // Ignore clicks on buttons, links or inputs
+    const target = e.target as HTMLElement;
+    if (target.closest('button') || target.closest('a') || target.closest('input')) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -360,114 +371,148 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     const w = rect.width;
     const h = rect.height;
 
-    // Check if interaction starts near bottom-right or bottom-left corner
     const distBR = Math.hypot(w - x, h - y);
     const distBL = Math.hypot(x, h - y);
 
-    let corner: 'bottom-right' | 'bottom-left' = 'bottom-right';
-    let nextP = currentPage + 1;
-
-    if (distBR < 160 || x > w * 0.55) {
-      if (currentPage >= pdfDoc.numPages) return;
-      corner = 'bottom-right';
-      nextP = currentPage + 1;
-    } else if (distBL < 160 || x < w * 0.45) {
-      if (currentPage <= 1) return;
-      corner = 'bottom-left';
-      nextP = currentPage - 1;
-    } else {
-      return;
-    }
-
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch {
-      // ignore
-    }
+    const isCornerBR = distBR < 120;
+    const isCornerBL = distBL < 120;
 
     dragRef.current = {
       startX: e.clientX,
       startY: e.clientY,
-      corner,
-      targetP: nextP,
       startTime: Date.now(),
+      corner: isCornerBL ? 'bottom-left' : 'bottom-right',
+      targetP: 0,
       pointerId: e.pointerId,
+      status: 'undetermined',
+      isCornerStart: isCornerBR || isCornerBL,
+      audioPlayed: false,
     };
 
-    setPeelCorner(corner);
-    setTargetPage(nextP);
-
-    // Play user's MP3 strictly at touch start
+    // Unlock audio context silently if needed
     initPageFlipAudio();
-    playPageFlipSound(!visualSettings.isSoundEnabled);
-
-    // Prepare target canvas
-    if (corner === 'bottom-right') {
-      if (cachedNextCanvasRef.current && nextP === currentPage + 1) {
-        copyCanvasContent(cachedNextCanvasRef.current, targetCanvasRef.current);
-      } else if (targetCanvasRef.current) {
-        renderPdfPageToCanvas(nextP, targetCanvasRef.current, zoom);
-      }
-    } else {
-      if (cachedPrevCanvasRef.current && nextP === currentPage - 1) {
-        copyCanvasContent(cachedPrevCanvasRef.current, targetCanvasRef.current);
-      } else if (targetCanvasRef.current) {
-        renderPdfPageToCanvas(nextP, targetCanvasRef.current, zoom);
-      }
-    }
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!dragRef.current || !pageSize.width || !pageSize.height) return;
 
-    const { startX, startY, corner } = dragRef.current;
-    const dx = e.clientX - startX;
-    const dy = e.clientY - startY;
+    const { startX, startY, status, isCornerStart } = dragRef.current;
+    const deltaX = e.clientX - startX;
+    const deltaY = e.clientY - startY;
+    const absX = Math.abs(deltaX);
+    const absY = Math.abs(deltaY);
 
-    const diagonal = Math.hypot(pageSize.width, pageSize.height);
-
-    let progress = 0;
-    if (corner === 'bottom-right') {
-      // Pulling toward top-left increases peel progress
-      const pullDist = (-dx - dy) / Math.SQRT2;
-      progress = Math.max(0, Math.min(1, pullDist / (diagonal * 0.65)));
-    } else {
-      // Pulling toward top-right increases backward peel progress
-      const pullDist = (dx - dy) / Math.SQRT2;
-      progress = Math.max(0, Math.min(1, pullDist / (diagonal * 0.65)));
+    // 1. If gesture is already determined to be vertical scrolling, ignore and allow native scroll
+    if (status === 'scrolling') {
+      return;
     }
 
-    setPeelProgress(progress);
+    // 2. Strict Scroll vs Swipe check:
+    // If vertical movement is greater than horizontal movement, lock to scroll mode
+    if (status === 'undetermined') {
+      if (absY > absX || absY > 12) {
+        dragRef.current.status = 'scrolling';
+        setPeelProgress(0);
+        setTargetPage(null);
+        return;
+      }
+
+      // Only enter swiping mode if horizontal movement is clearly dominant
+      const minThreshold = isCornerStart ? 18 : 28;
+      const isClearlyHorizontal = absX > absY * 1.5;
+
+      if (absX > minThreshold && isClearlyHorizontal) {
+        const isForward = deltaX < 0;
+        const corner: 'bottom-right' | 'bottom-left' = isForward ? 'bottom-right' : 'bottom-left';
+        const nextP = isForward ? currentPage + 1 : currentPage - 1;
+
+        if (nextP < 1 || nextP > (pdfDoc?.numPages || 1)) {
+          dragRef.current.status = 'scrolling';
+          return;
+        }
+
+        dragRef.current.status = 'swiping';
+        dragRef.current.corner = corner;
+        dragRef.current.targetP = nextP;
+
+        setPeelCorner(corner);
+        setTargetPage(nextP);
+
+        // Prepare target canvas underneath
+        if (isForward) {
+          if (cachedNextCanvasRef.current && nextP === currentPage + 1) {
+            copyCanvasContent(cachedNextCanvasRef.current, targetCanvasRef.current);
+          } else if (targetCanvasRef.current) {
+            renderPdfPageToCanvas(nextP, targetCanvasRef.current, zoom);
+          }
+        } else {
+          if (cachedPrevCanvasRef.current && nextP === currentPage - 1) {
+            copyCanvasContent(cachedPrevCanvasRef.current, targetCanvasRef.current);
+          } else if (targetCanvasRef.current) {
+            renderPdfPageToCanvas(nextP, targetCanvasRef.current, zoom);
+          }
+        }
+
+        // Play user's MP3 strictly upon confirming horizontal swipe
+        if (!dragRef.current.audioPlayed) {
+          dragRef.current.audioPlayed = true;
+          playPageFlipSound(!visualSettings.isSoundEnabled);
+        }
+      }
+    }
+
+    // 3. During active horizontal swiping:
+    if (dragRef.current.status === 'swiping') {
+      // If user swerved into predominantly vertical movement, cancel swipe
+      if (absY > absX) {
+        dragRef.current.status = 'scrolling';
+        setPeelProgress(0);
+        setTargetPage(null);
+        return;
+      }
+
+      const stageWidth = Math.max(260, pageSize.width);
+      const progress = Math.max(0, Math.min(1, (absX - 25) / (stageWidth * 0.52)));
+      setPeelProgress(progress);
+    }
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!dragRef.current || !pdfDoc) return;
 
-    try {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch {
-      // ignore
-    }
-
-    const { targetP, startTime, startX } = dragRef.current;
+    const { startX, startY, startTime, status, targetP } = dragRef.current;
+    const deltaX = e.clientX - startX;
+    const deltaY = e.clientY - startY;
+    const absX = Math.abs(deltaX);
+    const absY = Math.abs(deltaY);
     const elapsed = Date.now() - startTime;
-    const dx = Math.abs(e.clientX - startX);
     dragRef.current = null;
 
-    const isFlick = dx > 35 && elapsed < 300;
-    const shouldTurn = peelProgress > 0.22 || isFlick;
+    if (status === 'swiping') {
+      // Swipe threshold rule: strictly requires Math.abs(deltaX) > 60px and horizontal angle
+      const isAngleClearlyHorizontal = absX > absY;
+      const passesMinDistance = absX > 60;
+      const isFlick = passesMinDistance && elapsed < 350;
+      const shouldTurn =
+        isAngleClearlyHorizontal &&
+        passesMinDistance &&
+        (peelProgress > 0.20 || isFlick);
 
-    if (shouldTurn && targetP !== null) {
-      animatePeelTo(1.0, 360, () => {
-        setPeelProgress(0);
-        setTargetPage(null);
-        onPageChange(targetP);
-      });
+      if (shouldTurn && targetP !== null && targetP >= 1 && targetP <= pdfDoc.numPages) {
+        animatePeelTo(1.0, 340, () => {
+          setPeelProgress(0);
+          setTargetPage(null);
+          onPageChange(targetP);
+        });
+      } else {
+        animatePeelTo(0, 220, () => {
+          setPeelProgress(0);
+          setTargetPage(null);
+        });
+      }
     } else {
-      animatePeelTo(0, 240, () => {
-        setPeelProgress(0);
-        setTargetPage(null);
-      });
+      setPeelProgress(0);
+      setTargetPage(null);
     }
   };
 
@@ -647,7 +692,38 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
         </div>
       )}
 
-      {/* DOCUMENT STAGE: Page Curl 3D Viewport matching image.png */}
+      {/* Discrete Floating Navigation Arrows on Lateral Edges (Mobile & Desktop) */}
+      {currentPage > 1 && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            triggerCornerCurlTransition(currentPage - 1);
+          }}
+          aria-label="Página anterior"
+          title="Página anterior (o desliza horizontalmente)"
+          className="fixed left-2 sm:left-5 top-1/2 -translate-y-1/2 z-40 p-2.5 sm:p-3 rounded-full bg-[#111827]/85 hover:bg-[#111827] active:scale-95 backdrop-blur-md border border-[#334155]/80 hover:border-[#4cd7f6]/80 text-[#94a3b8] hover:text-[#4cd7f6] shadow-[0_8px_24px_rgba(0,0,0,0.65)] transition-all duration-200 group cursor-pointer"
+        >
+          <ChevronLeft className="w-5 h-5 sm:w-6 sm:h-6 group-hover:-translate-x-0.5 transition-transform" />
+        </button>
+      )}
+
+      {currentPage < (pdfDoc?.numPages || 1) && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            triggerCornerCurlTransition(currentPage + 1);
+          }}
+          aria-label="Página siguiente"
+          title="Página siguiente (o desliza horizontalmente)"
+          className="fixed right-2 sm:right-5 top-1/2 -translate-y-1/2 z-40 p-2.5 sm:p-3 rounded-full bg-[#111827]/85 hover:bg-[#111827] active:scale-95 backdrop-blur-md border border-[#334155]/80 hover:border-[#f59e0b]/80 text-[#94a3b8] hover:text-[#f59e0b] shadow-[0_8px_24px_rgba(0,0,0,0.65)] transition-all duration-200 group cursor-pointer"
+        >
+          <ChevronRight className="w-5 h-5 sm:w-6 sm:h-6 group-hover:translate-x-0.5 transition-transform" />
+        </button>
+      )}
+
+      {/* DOCUMENT STAGE: Page Curl 3D Viewport */}
       <div className="relative z-10 flex flex-col items-center max-w-full transition-all duration-150">
         {/* Book Outer Wrapper */}
         <div
@@ -655,7 +731,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerUp}
-          className="relative select-none rounded-lg sm:rounded-xl shadow-[0_25px_70px_-15px_rgba(0,0,0,0.92),0_0_1px_1px_rgba(255,255,255,0.07)] transition-shadow duration-300 max-w-full cursor-grab active:cursor-grabbing"
+          className="relative select-none rounded-lg sm:rounded-xl shadow-[0_25px_70px_-15px_rgba(0,0,0,0.92),0_0_1px_1px_rgba(255,255,255,0.07)] transition-shadow duration-300 max-w-full touch-pan-y"
           style={{
             backgroundColor: getContainerBg(),
             width: pageSize.width ? `${Math.floor(pageSize.width)}px` : 'auto',
@@ -738,7 +814,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
             <div className="absolute inset-y-0 left-0 w-4 bg-gradient-to-r from-black/40 to-transparent pointer-events-none" />
           </div>
 
-          {/* LAYER 3: 3D REAL PAGE CURL & SHADOW OVERLAY (exact replica of image.png) */}
+          {/* LAYER 3: 3D REAL PAGE CURL & SHADOW OVERLAY */}
           {isCurlVisible && (
             <svg
               className="absolute inset-0 w-full h-full pointer-events-none overflow-visible"
@@ -808,23 +884,23 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
             </svg>
           )}
 
-          {/* Interactive Hover & Drag Grab Zones in the Corners */}
+          {/* Interactive Hover & Click Zones in the Corners */}
           {currentPage < (pdfDoc?.numPages || 1) && (
             <div
-              className="absolute bottom-0 right-0 w-24 h-24 z-30 cursor-pointer"
+              className="absolute bottom-0 right-0 w-20 h-20 z-30 cursor-pointer"
               onMouseEnter={() => setIsHoveringCorner(true)}
               onMouseLeave={() => setIsHoveringCorner(false)}
               onClick={(e) => {
                 e.stopPropagation();
                 triggerCornerCurlTransition(currentPage + 1);
               }}
-              title="Hacer clic o arrastrar para pasar página con efecto Page Curl 3D"
+              title="Hacer clic para pasar página con efecto Page Curl 3D"
             />
           )}
 
           {currentPage > 1 && (
             <div
-              className="absolute bottom-0 left-0 w-24 h-24 z-30 cursor-pointer"
+              className="absolute bottom-0 left-0 w-20 h-20 z-30 cursor-pointer"
               onMouseEnter={() => {
                 setPeelCorner('bottom-left');
                 setIsHoveringCorner(true);
@@ -834,7 +910,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
                 e.stopPropagation();
                 triggerCornerCurlTransition(currentPage - 1);
               }}
-              title="Hacer clic o arrastrar para volver con efecto Page Curl 3D"
+              title="Hacer clic para volver a la página anterior"
             />
           )}
 
