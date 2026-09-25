@@ -1,6 +1,7 @@
 import React from 'react';
-import { X, Sliders, RotateCcw, Check, Sparkles } from 'lucide-react';
+import { X, Sliders, RotateCcw, Check, Sparkles, Volume2, VolumeX } from 'lucide-react';
 import { VisualSettings, BackgroundPreset, TextColorPreset } from '../types';
+import { playPageFlipSound } from '../utils/audio';
 
 interface ThemeModalProps {
   isOpen: boolean;
@@ -14,6 +15,7 @@ export const defaultVisualSettings: VisualSettings = {
   backgroundIntensity: 0.95,
   textColorPreset: 'white',
   textContrast: 1.05,
+  isSoundEnabled: true,
 };
 
 export const ThemeModal: React.FC<ThemeModalProps> = ({
@@ -217,6 +219,49 @@ export const ThemeModal: React.FC<ThemeModalProps> = ({
               <span>100%</span>
               <span>Alto contraste (135%)</span>
             </div>
+          </div>
+
+          {/* 5. Efecto de Sonido al Pasar Página */}
+          <div className="p-3 rounded-xl bg-[#0f131c] border border-[#1f2937] flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+                settings.isSoundEnabled !== false
+                  ? 'bg-[#f59e0b]/20 text-[#f59e0b]'
+                  : 'bg-[#1c2028] text-[#94a3b8]'
+              }`}>
+                {settings.isSoundEnabled !== false ? (
+                  <Volume2 className="w-4 h-4" />
+                ) : (
+                  <VolumeX className="w-4 h-4" />
+                )}
+              </div>
+              <div>
+                <span className="font-['Space_Grotesk'] text-xs font-semibold text-[#dfe2ee] block">
+                  Sonido de Hoja de Papel
+                </span>
+                <span className="text-[10px] text-[#94a3b8] font-['JetBrains_Mono']">
+                  Efecto acústico sutil al pasar cada página
+                </span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                const newState = settings.isSoundEnabled === false;
+                onSettingsChange({ ...settings, isSoundEnabled: newState });
+                if (newState) {
+                  playPageFlipSound(false);
+                }
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-['JetBrains_Mono'] font-medium transition-colors border ${
+                settings.isSoundEnabled !== false
+                  ? 'bg-[#1c2028] border-[#f59e0b] text-[#f59e0b]'
+                  : 'bg-[#1c2028] border-[#334155] text-[#94a3b8]'
+              }`}
+            >
+              {settings.isSoundEnabled !== false ? 'Activado' : 'Silenciado'}
+            </button>
           </div>
         </div>
 

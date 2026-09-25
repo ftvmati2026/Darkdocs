@@ -16,7 +16,9 @@ import {
   Sliders,
   BookMarked,
   ArrowRight,
-  Home
+  Home,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -26,6 +28,7 @@ interface HeaderProps {
   zoom: number;
   isDarkMode: boolean;
   isFullscreen: boolean;
+  isSoundEnabled?: boolean;
   storedCount: number;
   viewMode: 'home' | 'viewer';
   onNavigateHome: () => void;
@@ -35,6 +38,7 @@ interface HeaderProps {
   onFitWidth: () => void;
   onToggleDarkMode: () => void;
   onToggleFullscreen: () => void;
+  onToggleSound?: () => void;
   onFileUpload: (file: File) => void;
   onOpenHistory: () => void;
   onOpenThemeModal: () => void;
@@ -47,6 +51,7 @@ export const Header: React.FC<HeaderProps> = ({
   zoom,
   isDarkMode,
   isFullscreen,
+  isSoundEnabled = true,
   storedCount,
   viewMode,
   onNavigateHome,
@@ -56,6 +61,7 @@ export const Header: React.FC<HeaderProps> = ({
   onFitWidth,
   onToggleDarkMode,
   onToggleFullscreen,
+  onToggleSound,
   onFileUpload,
   onOpenHistory,
   onOpenThemeModal,
@@ -90,23 +96,23 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <>
       <header className="fixed top-0 left-0 right-0 z-40 bg-[#0a0e16]/95 backdrop-blur-xl border-b border-[#1f2937]/70 shadow-[0_1px_12px_rgba(0,0,0,0.6)]">
-        <div className="h-14 w-full px-3 sm:px-6 flex items-center justify-between gap-2">
+        <div className="h-12 sm:h-14 w-full px-2 sm:px-6 flex items-center justify-between gap-1.5 sm:gap-2">
           {/* Left: Brand Logo that navigates to Home Screen */}
-          <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-4 shrink-0">
             <button
               type="button"
               onClick={onNavigateHome}
-              className="flex items-center gap-2 select-none group text-left cursor-pointer focus:outline-none"
+              className="flex items-center gap-1.5 sm:gap-2 select-none group text-left cursor-pointer focus:outline-none"
               title="Ir a la Pantalla de Inicio / Biblioteca (Darkdocs)"
             >
-              <div className="w-8 h-8 rounded-lg bg-[#1c2028] border border-[#334155] flex items-center justify-center text-[#f59e0b] shadow-inner group-hover:border-[#f59e0b] transition-all">
-                <BookMarked className="w-4 h-4 text-[#f59e0b] group-hover:scale-110 transition-transform" />
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-[#1c2028] border border-[#334155] flex items-center justify-center text-[#f59e0b] shadow-inner group-hover:border-[#f59e0b] transition-all">
+                <BookMarked className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#f59e0b] group-hover:scale-110 transition-transform" />
               </div>
               <div className="flex flex-col">
-                <span className="font-['Space_Grotesk'] text-base sm:text-lg font-bold tracking-tight text-[#dfe2ee] leading-none">
+                <span className="font-['Space_Grotesk'] text-sm sm:text-lg font-bold tracking-tight text-[#dfe2ee] leading-none">
                   Dark<span className="text-[#f59e0b]">docs</span>
                 </span>
-                <span className="text-[9px] text-[#94a3b8] font-['JetBrains_Mono'] tracking-wider uppercase opacity-75">
+                <span className="text-[8px] sm:text-[9px] text-[#94a3b8] font-['JetBrains_Mono'] tracking-wider uppercase opacity-75 hidden xs:block">
                   Lector PDF
                 </span>
               </div>
@@ -117,7 +123,7 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 type="button"
                 onClick={onContinueReading}
-                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[#181c24] hover:bg-[#1c2028] text-[#4cd7f6] border border-[#4cd7f6]/40 text-xs font-['JetBrains_Mono'] transition-all shadow"
+                className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-[#181c24] hover:bg-[#1c2028] text-[#4cd7f6] border border-[#4cd7f6]/40 text-xs font-['JetBrains_Mono'] transition-all shadow"
                 title="Volver al documento que estás leyendo"
               >
                 <span>Volver al lector</span>
@@ -141,7 +147,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={onOpenHistory}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-[#181c24] hover:bg-[#262a33] text-[#dfe2ee] border border-[#1f2937] hover:border-[#334155] text-xs font-['JetBrains_Mono'] transition-colors"
+              className="inline-flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-md bg-[#181c24] hover:bg-[#262a33] text-[#dfe2ee] border border-[#1f2937] hover:border-[#334155] text-xs font-['JetBrains_Mono'] transition-colors"
               title="Biblioteca de PDFs guardados en IndexedDB"
             >
               <BookOpen className="w-3.5 h-3.5 text-[#4cd7f6]" />
@@ -152,17 +158,6 @@ export const Header: React.FC<HeaderProps> = ({
                 </span>
               )}
             </button>
-
-            {/* In viewer mode: show active document name */}
-            {viewMode === 'viewer' && fileName && (
-              <div
-                className="hidden xl:flex items-center gap-1.5 text-xs text-[#94a3b8] max-w-[170px] truncate"
-                title={fileName}
-              >
-                <FileText className="w-3.5 h-3.5 shrink-0 text-[#f59e0b]" />
-                <span className="truncate">{fileName}</span>
-              </div>
-            )}
           </div>
 
           {/* Center (Desktop / Tablet in Viewer mode): Pagination & Zoom Controls */}
@@ -235,7 +230,7 @@ export const Header: React.FC<HeaderProps> = ({
                   type="button"
                   onClick={onFitWidth}
                   className="flex items-center gap-1 px-2 py-1 rounded hover:bg-[#262a33] text-[#94a3b8] hover:text-[#dfe2ee] text-xs font-['JetBrains_Mono'] transition-colors"
-                  title="Ajustar al ancho"
+                  title="Ajustar al ancho 100%"
                 >
                   <span>Ajustar ancho</span>
                 </button>
@@ -250,7 +245,7 @@ export const Header: React.FC<HeaderProps> = ({
                 type="button"
                 onClick={() => onPageChange(currentPage - 1)}
                 disabled={currentPage <= 1}
-                className="w-7 h-7 flex items-center justify-center rounded text-[#94a3b8] disabled:opacity-20"
+                className="w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center rounded text-[#94a3b8] disabled:opacity-20"
               >
                 <ChevronLeft className="w-3.5 h-3.5" />
               </button>
@@ -261,7 +256,7 @@ export const Header: React.FC<HeaderProps> = ({
                 type="button"
                 onClick={() => onPageChange(currentPage + 1)}
                 disabled={currentPage >= totalPages}
-                className="w-7 h-7 flex items-center justify-center rounded text-[#94a3b8] disabled:opacity-20"
+                className="w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center rounded text-[#94a3b8] disabled:opacity-20"
               >
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
@@ -269,17 +264,21 @@ export const Header: React.FC<HeaderProps> = ({
           )}
 
           {/* Right: Desktop Actions & Mobile Hamburger */}
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {/* If in viewer mode, button to go to Home */}
-            {viewMode === 'viewer' && (
+          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+            {/* Quick sound toggle in header (desktop) */}
+            {onToggleSound && (
               <button
                 type="button"
-                onClick={onNavigateHome}
-                className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-[#181c24] hover:bg-[#262a33] text-[#94a3b8] hover:text-[#dfe2ee] border border-[#1f2937] text-xs font-medium transition-colors"
-                title="Ir a Inicio"
+                onClick={onToggleSound}
+                className={`hidden sm:inline-flex items-center gap-1.5 px-2 py-1.5 rounded-md border transition-colors text-xs font-['JetBrains_Mono'] ${
+                  isSoundEnabled
+                    ? 'bg-[#181c24] border-[#56e5a9]/40 text-[#56e5a9] hover:bg-[#1c2028]'
+                    : 'bg-[#181c24] border-[#334155] text-[#94a3b8] hover:text-[#dfe2ee]'
+                }`}
+                title={isSoundEnabled ? 'Sonido de página activo' : 'Sonido silenciado'}
               >
-                <Home className="w-3.5 h-3.5" />
-                <span className="hidden md:inline">Inicio</span>
+                {isSoundEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+                <span className="hidden xl:inline">{isSoundEnabled ? 'Sonido ON' : 'Mute'}</span>
               </button>
             )}
 
@@ -318,21 +317,32 @@ export const Header: React.FC<HeaderProps> = ({
               )}
             </button>
 
-            {/* Fullscreen Button */}
+            {/* Clear, Prominent Native Fullscreen Button */}
             <button
               type="button"
               onClick={onToggleFullscreen}
-              className="hidden sm:flex w-8 h-8 items-center justify-center rounded-md bg-[#1c2028] border border-[#1f2937] hover:bg-[#262a33] text-[#94a3b8] hover:text-[#dfe2ee] transition-colors"
-              title={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-xs font-['JetBrains_Mono'] transition-all ${
+                isFullscreen
+                  ? 'bg-[#f59e0b]/20 border-[#f59e0b] text-[#f59e0b]'
+                  : 'bg-[#1c2028] border-[#334155]/70 hover:border-[#f59e0b]/60 text-[#dfe2ee] hover:text-white'
+              }`}
+              title={isFullscreen ? 'Salir de pantalla completa (Esc)' : 'Pantalla Completa Real'}
             >
-              {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+              {isFullscreen ? (
+                <Minimize2 className="w-3.5 h-3.5 text-[#f59e0b]" />
+              ) : (
+                <Maximize2 className="w-3.5 h-3.5 text-[#f59e0b]" />
+              )}
+              <span className="hidden sm:inline font-medium">
+                {isFullscreen ? 'Salir Fullscreen' : 'Pantalla Completa'}
+              </span>
             </button>
 
             {/* Mobile Hamburger Menu Toggle */}
             <button
               type="button"
               onClick={() => setMobileMenuOpen((prev) => !prev)}
-              className="flex lg:hidden w-8 h-8 items-center justify-center rounded-md bg-[#1c2028] border border-[#334155]/80 text-[#dfe2ee] hover:bg-[#262a33] transition-colors"
+              className="flex lg:hidden w-8 h-8 items-center justify-center rounded-md bg-[#1c2028] border border-[#334155]/80 text-[#dfe2ee] hover:bg-[#262a33] transition-colors ml-1"
               title="Abrir menú de controles"
             >
               {mobileMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
@@ -343,8 +353,26 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Mobile / Tablet Collapsible Menu Drawer */}
       {mobileMenuOpen && (
-        <div className="fixed inset-0 z-30 lg:hidden flex flex-col pt-14 bg-black/60 backdrop-blur-sm animate-fade-in">
-          <div className="bg-[#111827] border-b border-[#334155]/80 shadow-2xl p-4 sm:p-5 space-y-4 max-h-[85vh] overflow-y-auto">
+        <div className="fixed inset-0 z-30 lg:hidden flex flex-col pt-12 sm:pt-14 bg-black/70 backdrop-blur-sm animate-fade-in">
+          <div className="bg-[#111827] border-b border-[#334155]/80 shadow-2xl p-4 sm:p-5 space-y-3.5 max-h-[88vh] overflow-y-auto">
+            {/* Prominent Fullscreen Banner button in Mobile Menu */}
+            <button
+              type="button"
+              onClick={() => {
+                onToggleFullscreen();
+                setMobileMenuOpen(false);
+              }}
+              className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-[#1c2028] to-[#181c24] border border-[#f59e0b]/50 text-[#f59e0b] flex items-center justify-between text-xs font-semibold font-['JetBrains_Mono'] shadow-md hover:bg-[#262a33]"
+            >
+              <div className="flex items-center gap-2">
+                {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                <span>{isFullscreen ? 'Salir de Pantalla Completa' : 'Modo Pantalla Completa Real'}</span>
+              </div>
+              <span className="text-[10px] bg-[#f59e0b]/10 px-2 py-0.5 rounded">
+                {isFullscreen ? 'Activo' : 'Activar'}
+              </span>
+            </button>
+
             {/* Navigation links for Home / Viewer */}
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -377,7 +405,7 @@ export const Header: React.FC<HeaderProps> = ({
                   }`}
                 >
                   <FileText className="w-4 h-4" />
-                  <span>Ver Documento</span>
+                  <span>Ver Lector</span>
                 </button>
               )}
             </div>
@@ -406,7 +434,7 @@ export const Header: React.FC<HeaderProps> = ({
             {viewMode === 'viewer' && totalPages > 0 && (
               <div className="p-3 rounded-lg bg-[#181c24] border border-[#1f2937] space-y-2">
                 <span className="text-xs font-medium text-[#94a3b8] font-['JetBrains_Mono'] block">
-                  Controles de Zoom ({zoomPercent}%)
+                  Controles de Escala ({zoomPercent}%)
                 </span>
                 <div className="flex items-center gap-2">
                   <button
@@ -437,26 +465,29 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             )}
 
-            {/* Quick Actions Grid */}
+            {/* Sound & Dark Mode Grid */}
             <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  onOpenThemeModal();
-                  setMobileMenuOpen(false);
-                }}
-                className="p-3 rounded-lg bg-[#181c24] border border-[#1f2937] hover:border-[#334155] flex flex-col items-center justify-center gap-1.5 text-xs text-[#dfe2ee]"
-              >
-                <Sliders className="w-4 h-4 text-[#f59e0b]" />
-                <span className="font-medium">Calibración Visual</span>
-                <span className="text-[10px] text-[#94a3b8]">Fondo y Texto</span>
-              </button>
+              {/* Sound Toggle */}
+              {onToggleSound && (
+                <button
+                  type="button"
+                  onClick={onToggleSound}
+                  className={`p-3 rounded-lg border flex flex-col items-center justify-center gap-1.5 text-xs ${
+                    isSoundEnabled
+                      ? 'bg-[#181c24] border-[#56e5a9]/50 text-[#56e5a9]'
+                      : 'bg-[#181c24] border-[#334155] text-[#94a3b8]'
+                  }`}
+                >
+                  {isSoundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                  <span className="font-medium">{isSoundEnabled ? 'Sonido Activo' : 'Silenciado'}</span>
+                  <span className="text-[10px] text-[#94a3b8]">Efecto hoja de papel</span>
+                </button>
+              )}
 
+              {/* Dark Mode Invert */}
               <button
                 type="button"
-                onClick={() => {
-                  onToggleDarkMode();
-                }}
+                onClick={onToggleDarkMode}
                 className={`p-3 rounded-lg border flex flex-col items-center justify-center gap-1.5 text-xs ${
                   isDarkMode
                     ? 'bg-[#181c24] border-[#4cd7f6]/50 text-[#4cd7f6]'
@@ -469,7 +500,20 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             </div>
 
+            {/* Calibration & Library */}
             <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  onOpenThemeModal();
+                  setMobileMenuOpen(false);
+                }}
+                className="p-2.5 rounded-lg bg-[#181c24] border border-[#1f2937] hover:border-[#334155] flex items-center justify-center gap-2 text-xs text-[#dfe2ee]"
+              >
+                <Sliders className="w-4 h-4 text-[#f59e0b]" />
+                <span>Calibración</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => {
@@ -481,18 +525,6 @@ export const Header: React.FC<HeaderProps> = ({
                 <BookOpen className="w-4 h-4 text-[#4cd7f6]" />
                 <span>Biblioteca ({storedCount})</span>
               </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  onToggleFullscreen();
-                  setMobileMenuOpen(false);
-                }}
-                className="p-2.5 rounded-lg bg-[#181c24] border border-[#1f2937] hover:border-[#334155] flex items-center justify-center gap-2 text-xs text-[#dfe2ee]"
-              >
-                {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-                <span>{isFullscreen ? 'Salir Zen' : 'Pantalla Zen'}</span>
-              </button>
             </div>
           </div>
         </div>
@@ -500,3 +532,4 @@ export const Header: React.FC<HeaderProps> = ({
     </>
   );
 };
+

@@ -21,6 +21,8 @@ import { FloatingHud } from './components/FloatingHud';
 import { HomeScreen } from './components/HomeScreen';
 import { HistoryDrawer } from './components/HistoryDrawer';
 import { ThemeModal, defaultVisualSettings } from './components/ThemeModal';
+import { FullscreenHud } from './components/FullscreenHud';
+import { playPageFlipSound } from './utils/audio';
 
 const VISUAL_SETTINGS_KEY = 'darkdocs_visual_settings';
 const LAST_ACTIVE_ID_KEY = 'darkdocs_last_active_id';
@@ -68,13 +70,36 @@ export default function App() {
     }
   };
 
-  // Fullscreen event listener
+  // Fullscreen event listener with webkit prefix support
   useEffect(() => {
     const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      const doc = document as unknown as { fullscreenElement?: Element; webkitFullscreenElement?: Element };
+      setIsFullscreen(!!(doc.fullscreenElement || doc.webkitFullscreenElement));
     };
     document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+    };
+  }, []);
+
+  // Quick sound toggle handler
+  const handleToggleSound = useCallback(() => {
+    setVisualSettings((prev) => {
+      const isCurrentlyEnabled = prev.isSoundEnabled !== false;
+      const nextEnabled = !isCurrentlyEnabled;
+      if (nextEnabled) {
+        playPageFlipSound(false);
+      }
+      const updated = { ...prev, isSoundEnabled: nextEnabled };
+      try {
+        localStorage.setItem(VISUAL_SETTINGS_KEY, JSON.stringify(updated));
+      } catch {
+        // ignore
+      }
+      return updated;
+    });
   }, []);
 
   // Fetch stored PDFs list from IndexedDB
@@ -90,7 +115,7 @@ export default function App() {
   }, []);
 
   /**
-   * Calculate zoom scale to fit page width in viewport
+   * Calculate zoom scale to fit page in viewport (100% responsive for portrait and landscape)
    */
   const fitWidth = useCallback(
     async (activeDoc = pdfDoc) => {
@@ -101,11 +126,33 @@ export default function App() {
 
         const containerWidth =
           containerRef.current?.clientWidth || window.innerWidth;
-        const marginOffset = window.innerWidth < 640 ? 24 : 64;
-        const availableWidth = Math.max(260, containerWidth - marginOffset);
+        const containerHeight =
+          containerRef.current?.clientHeight || window.innerHeight;
 
-        const newScale = Math.min(2.5, Math.max(0.4, availableWidth / unscaledViewport.width));
-        setZoom(Number(newScale.toFixed(2)));
+        const isLandscape =
+          window.innerWidth > window.innerHeight && window.innerHeight < 650;
+        const isMobilePortrait = window.innerWidth < 640;
+
+        const marginX = isLandscape ? 16 : isMobilePortrait ? 10 : 44;
+        const availableWidth = Math.max(220, containerWidth - marginX);
+
+        const scaleX = availableWidth / unscaledViewport.width;
+
+        // In landscape orientation, also ensure the height doesn't overflow the viewport
+        if (isLandscape) {
+          const headerAndHudOffset = window.innerHeight < 450 ? 56 : 84;
+          const availableHeight = Math.max(
+            180,
+            containerHeight - headerAndHudOffset
+          );
+          const scaleY = availableHeight / unscaledViewport.height;
+          const combinedScale = Math.min(scaleX, scaleY);
+          const newScale = Math.min(2.5, Math.max(0.35, combinedScale));
+          setZoom(Number(newScale.toFixed(2)));
+        } else {
+          const newScale = Math.min(2.5, Math.max(0.35, scaleX));
+          setZoom(Number(newScale.toFixed(2)));
+        }
       } catch (err) {
         console.error('Fit width error:', err);
       }
@@ -373,15 +420,34 @@ export default function App() {
   );
 
   const handleToggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch((err) => {
-        console.error('Error entering fullscreen:', err);
-      });
-    } else {
-      if (document.exitFullscreen) {
-        document.exitFullscreen().catch((err) => {
-          console.error('Error exiting fullscreen:', err);
+    const doc = document as unknown as {
+      fullscreenElement?: Element;
+      webkitFullscreenElement?: Element;
+      exitFullscreen?: () => Promise<void>;
+      webkitExitFullscreen?: () => void;
+    };
+    const docEl = document.documentElement as unknown as {
+      requestFullscreen?: () => Promise<void>;
+      webkitRequestFullscreen?: () => void;
+    };
+
+    const isFs = !!(doc.fullscreenElement || doc.webkitFullscreenElement);
+
+    if (!isFs) {
+      if (docEl.requestFullscreen) {
+        docEl.requestFullscreen().catch((err) => {
+          console.warn('Native fullscreen request rejected:', err);
         });
+      } else if (docEl.webkitRequestFullscreen) {
+        docEl.webkitRequestFullscreen();
+      }
+    } else {
+      if (doc.exitFullscreen) {
+        doc.exitFullscreen().catch((err) => {
+          console.warn('Exit fullscreen error:', err);
+        });
+      } else if (doc.webkitExitFullscreen) {
+        doc.webkitExitFullscreen();
       }
     }
   };
@@ -396,6 +462,7 @@ export default function App() {
         zoom={zoom}
         isDarkMode={isDarkMode}
         isFullscreen={isFullscreen}
+        isSoundEnabled={visualSettings.isSoundEnabled !== false}
         storedCount={storedRecords.length}
         viewMode={viewMode}
         onNavigateHome={() => setViewMode('home')}
@@ -405,13 +472,14 @@ export default function App() {
         onFitWidth={() => fitWidth()}
         onToggleDarkMode={() => setIsDarkMode((prev) => !prev)}
         onToggleFullscreen={handleToggleFullscreen}
+        onToggleSound={handleToggleSound}
         onFileUpload={handleFileUpload}
         onOpenHistory={() => setIsHistoryOpen(true)}
         onOpenThemeModal={() => setIsThemeModalOpen(true)}
       />
 
       {/* Main Viewport Container */}
-      <main className="flex-1 w-full pt-14 relative flex flex-col">
+      <main className="flex-1 w-full pt-12 sm:pt-14 relative flex flex-col">
         {viewMode === 'home' || !pdfDoc ? (
           <HomeScreen
             activeFileName={fileName}
@@ -448,8 +516,33 @@ export default function App() {
               totalPages={totalPages}
               zoom={zoom}
               isDarkMode={isDarkMode}
+              isSoundEnabled={visualSettings.isSoundEnabled !== false}
               onPageChange={(page) => setCurrentPage(Math.max(1, Math.min(totalPages, page)))}
               onToggleDarkMode={() => setIsDarkMode((prev) => !prev)}
+              onToggleSound={handleToggleSound}
+            />
+
+            {/* Discreet Floating Fullscreen Control HUD (available in fullscreen and mobile landscape) */}
+            <FullscreenHud
+              isVisible={
+                isFullscreen ||
+                (typeof window !== 'undefined' &&
+                  window.innerHeight < 520 &&
+                  window.innerWidth > window.innerHeight)
+              }
+              currentPage={currentPage}
+              totalPages={totalPages}
+              zoom={zoom}
+              isDarkMode={isDarkMode}
+              visualSettings={visualSettings}
+              fileName={fileName}
+              onPageChange={(page) => setCurrentPage(Math.max(1, Math.min(totalPages, page)))}
+              onNavigateHome={() => setViewMode('home')}
+              onToggleFullscreen={handleToggleFullscreen}
+              onToggleDarkMode={() => setIsDarkMode((prev) => !prev)}
+              onFitWidth={() => fitWidth()}
+              onOpenThemeModal={() => setIsThemeModalOpen(true)}
+              onToggleSound={handleToggleSound}
             />
           </>
         )}

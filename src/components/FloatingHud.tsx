@@ -1,13 +1,15 @@
 import React from 'react';
-import { ChevronLeft, ChevronRight, Eye } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Eye, Volume2, VolumeX } from 'lucide-react';
 
 interface FloatingHudProps {
   currentPage: number;
   totalPages: number;
   zoom: number;
   isDarkMode: boolean;
+  isSoundEnabled?: boolean;
   onPageChange: (page: number) => void;
   onToggleDarkMode: () => void;
+  onToggleSound?: () => void;
 }
 
 export const FloatingHud: React.FC<FloatingHudProps> = ({
@@ -15,36 +17,38 @@ export const FloatingHud: React.FC<FloatingHudProps> = ({
   totalPages,
   zoom,
   isDarkMode,
+  isSoundEnabled = true,
   onPageChange,
   onToggleDarkMode,
+  onToggleSound,
 }) => {
   const zoomPercent = Math.round(zoom * 100);
 
   return (
     <aside
       aria-label="Estado de lectura"
-      className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 max-w-[95vw] pointer-events-auto"
+      className="fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-40 max-w-[96vw] pointer-events-auto hud-bottom-bar"
     >
-      <div className="flex items-center gap-3 px-4 py-2 rounded-full bg-[#111827]/90 backdrop-blur-md border border-[#334155]/60 shadow-[0_8px_32px_rgba(0,0,0,0.7)] text-[#dfe2ee]">
+      <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full bg-[#111827]/90 backdrop-blur-md border border-[#334155]/70 shadow-[0_8px_32px_rgba(0,0,0,0.7)] text-[#dfe2ee]">
         {/* Live status dot & page count */}
-        <div className="flex items-center gap-2 select-none">
+        <div className="flex items-center gap-1.5 sm:gap-2 select-none">
           <span className="relative flex h-2 w-2">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#f59e0b] opacity-75" />
             <span className="relative inline-flex rounded-full h-2 w-2 bg-[#f59e0b]" />
           </span>
           <span className="font-['JetBrains_Mono'] text-xs text-[#dfe2ee] font-medium whitespace-nowrap">
-            Página {currentPage} de {totalPages}
+            {currentPage}/{totalPages}
           </span>
         </div>
 
         <span className="w-1 h-3 bg-[#31353e] rounded-full hidden xs:inline-block" />
 
         {/* Zoom badge */}
-        <span className="font-['JetBrains_Mono'] text-xs text-[#4cd7f6] bg-[#4cd7f6]/10 px-2 py-0.5 rounded font-mono hidden xs:inline-block">
+        <span className="font-['JetBrains_Mono'] text-xs text-[#4cd7f6] bg-[#4cd7f6]/10 px-1.5 py-0.5 rounded font-mono hidden xs:inline-block">
           {zoomPercent}%
         </span>
 
-        <span className="w-1 h-3 bg-[#31353e] rounded-full" />
+        <span className="w-1 h-3 bg-[#31353e] rounded-full hidden sm:inline-block" />
 
         {/* Inverted / Dark Mode indicator */}
         <button
@@ -59,13 +63,36 @@ export const FloatingHud: React.FC<FloatingHudProps> = ({
               isDarkMode ? 'text-[#56e5a9]' : 'text-[#94a3b8]'
             }`}
           >
-            {isDarkMode ? 'Modo Invertido Activo' : 'Modo Original'}
+            {isDarkMode ? 'Invertido' : 'Original'}
           </span>
         </button>
 
+        {/* Quick Sound Toggle Button */}
+        {onToggleSound && (
+          <>
+            <span className="w-1 h-3 bg-[#31353e] rounded-full" />
+            <button
+              type="button"
+              onClick={onToggleSound}
+              className={`p-1 rounded-full transition-colors ${
+                isSoundEnabled
+                  ? 'text-[#56e5a9] hover:bg-[#56e5a9]/10'
+                  : 'text-[#94a3b8] hover:text-[#dfe2ee] hover:bg-[#262a33]'
+              }`}
+              title={isSoundEnabled ? 'Sonido de página activo (clic para silenciar)' : 'Silenciado (clic para activar sonido)'}
+            >
+              {isSoundEnabled ? (
+                <Volume2 className="w-3.5 h-3.5" />
+              ) : (
+                <VolumeX className="w-3.5 h-3.5" />
+              )}
+            </button>
+          </>
+        )}
+
         <span className="w-1 h-3 bg-[#31353e] rounded-full hidden md:inline-block" />
 
-        {/* Key shortcut helper */}
+        {/* Key & Touch shortcut helper */}
         <div className="hidden md:flex items-center gap-1 text-[#94a3b8] font-['JetBrains_Mono'] text-xs select-none">
           <span>Usa</span>
           <kbd className="px-1.5 py-0.5 rounded bg-[#262a33] text-[#dfe2ee] text-[11px] border border-[#334155]/60 font-mono">
@@ -74,11 +101,11 @@ export const FloatingHud: React.FC<FloatingHudProps> = ({
           <kbd className="px-1.5 py-0.5 rounded bg-[#262a33] text-[#dfe2ee] text-[11px] border border-[#334155]/60 font-mono">
             →
           </kbd>
-          <span className="text-[#94a3b8]/80 text-[11px]">o scroll</span>
+          <span className="text-[#94a3b8]/80 text-[11px]">o desliza</span>
         </div>
 
         {/* Quick page jumper stepper */}
-        <div className="flex items-center ml-1 border-l border-[#31353e] pl-2 gap-0.5">
+        <div className="flex items-center ml-0.5 border-l border-[#31353e] pl-1 sm:pl-2 gap-0.5">
           <button
             type="button"
             onClick={() => onPageChange(currentPage - 1)}
@@ -102,3 +129,4 @@ export const FloatingHud: React.FC<FloatingHudProps> = ({
     </aside>
   );
 };
+

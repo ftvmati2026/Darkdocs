@@ -37,3 +37,94 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #353942;
 }
+
+/* Book 3D Interactive Stage and Physics */
+.book-stage-perspective {
+  perspective: 2400px;
+  -webkit-perspective: 2400px;
+  perspective-origin: center center;
+}
+
+.preserve-3d {
+  transform-style: preserve-3d;
+  -webkit-transform-style: preserve-3d;
+}
+
+.backface-hidden {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* Subtle corner curl invitation hint on hover */
+.corner-curl-hint-br {
+  transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.4, 1), box-shadow 0.25s ease;
+  transform-origin: bottom right;
+}
+.corner-curl-hint-br:hover {
+  transform: rotateZ(3deg) rotateY(-8deg) translateZ(8px);
+}
+
+.corner-curl-hint-bl {
+  transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.4, 1), box-shadow 0.25s ease;
+  transform-origin: bottom left;
+}
+.corner-curl-hint-bl:hover {
+  transform: rotateZ(-3deg) rotateY(8deg) translateZ(8px);
+}
+
+/* Dynamic 3D Book Page Turning Keyframes (discrete flip fallback) */
+@keyframes pageTurnForward3D {
+  0% {
+    transform: rotateY(0deg);
+  }
+  40% {
+    transform: rotateY(-80deg) rotateZ(-3deg) translateZ(30px);
+  }
+  70% {
+    transform: rotateY(-140deg) rotateZ(-1deg) translateZ(15px);
+  }
+  100% {
+    transform: rotateY(-180deg);
+  }
+}
+
+@keyframes pageTurnBackward3D {
+  0% {
+    transform: rotateY(-180deg);
+  }
+  40% {
+    transform: rotateY(-100deg) rotateZ(3deg) translateZ(30px);
+  }
+  70% {
+    transform: rotateY(-40deg) rotateZ(1deg) translateZ(15px);
+  }
+  100% {
+    transform: rotateY(0deg);
+  }
+}
+
+.animate-flip-forward-3d {
+  animation: pageTurnForward3D 0.46s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+  transform-origin: left center;
+}
+
+.animate-flip-backward-3d {
+  animation: pageTurnBackward3D 0.46s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+  transform-origin: left center;
+}
+
+/* Mobile landscape optimizations */
+@media (max-height: 500px) and (orientation: landscape) {
+  header {
+    height: 2.75rem !important;
+  }
+  main {
+    padding-top: 2.75rem !important;
+  }
+  .hud-bottom-bar {
+    bottom: 0.5rem !important;
+    padding-top: 0.25rem !important;
+    padding-bottom: 0.25rem !important;
+  }
+}
+

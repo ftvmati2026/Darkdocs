@@ -16,4 +16,5 @@ export interface VisualSettings {
   backgroundIntensity: number; // 0.6 to 1.0 (brightness / opacity)
   textColorPreset: TextColorPreset;
   textContrast: number; // 0.7 to 1.3
+  isSoundEnabled?: boolean; // Page turn audio effect
 }
