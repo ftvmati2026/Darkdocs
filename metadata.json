@@ -1,0 +1,6 @@
+{
+  "name": "DarkPDF - Visor de PDF con Modo Oscuro Invertido",
+  "description": "Lector y visor de PDF con inversión de colores en tiempo real para lectura descansada y sin fatiga ocular.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
