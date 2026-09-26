@@ -79,14 +79,14 @@ export async function savePdfToDb(record: StoredPdfRecord): Promise<void> {
 
   if (record.arrayBuffer && record.arrayBuffer.byteLength > 0) {
     safeRecord.arrayBuffer = record.arrayBuffer.slice(0);
-    // Also store Base64 backup to ensure infallible retrieval across all webviews
-    if (!record.dataBase64) {
+    // Only store Base64 backup for small files (< 4MB) to prevent freezing for large multi-page books
+    if (!record.dataBase64 && record.arrayBuffer.byteLength < 4 * 1024 * 1024) {
       try {
         safeRecord.dataBase64 = arrayBufferToBase64(record.arrayBuffer);
       } catch (err) {
-        console.warn('Could not generate Base64 backup for large PDF:', err);
+        console.warn('Could not generate Base64 backup:', err);
       }
-    } else {
+    } else if (record.dataBase64) {
       safeRecord.dataBase64 = record.dataBase64;
     }
   } else if (record.dataBase64) {

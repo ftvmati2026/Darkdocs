@@ -38,6 +38,12 @@ export default function App() {
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [loadingProgress, setLoadingProgress] = useState<{
+    loaded: number;
+    total: number;
+    percent: number;
+    message?: string;
+  } | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Stored PDF records from IndexedDB
@@ -161,22 +167,47 @@ export default function App() {
   );
 
   /**
-   * Load ArrayBuffer directly into pdfjs-dist and switch to viewer mode
+   * Load ArrayBuffer directly into pdfjs-dist with Lazy Loading and Progressive Feedback
    */
   const loadPdfFromArrayBuffer = useCallback(
     async (arrayBuffer: ArrayBuffer, name: string, recordId?: string) => {
       try {
         setIsLoading(true);
+        setLoadingProgress({ loaded: 0, total: arrayBuffer.byteLength, percent: 12, message: 'Cargando libro...' });
         setErrorMessage(null);
 
         // Always clone the buffer for pdfjs to avoid detaching our storage copy
         const bufferForPdfJs = arrayBuffer.slice(0);
 
+        // Lazy loading configuration: disableAutoFetch ensures pdf.js doesn't parse all pages upfront
         const loadingTask = pdfjsLib.getDocument({
           data: new Uint8Array(bufferForPdfJs),
           cMapUrl: 'https://unpkg.com/pdfjs-dist@legacy/cmaps/',
           cMapPacked: true,
+          disableAutoFetch: true, // Only fetch page streams on demand!
+          disableStream: false,
+          rangeChunkSize: 65536,
         });
+
+        // Real-time progress feedback while reading document structure
+        loadingTask.onProgress = ({ loaded, total }: { loaded: number; total: number }) => {
+          if (total > 0) {
+            const pct = Math.min(95, Math.max(12, Math.round((loaded / total) * 100)));
+            setLoadingProgress({
+              loaded,
+              total,
+              percent: pct,
+              message: `Cargando libro... ${pct}%`,
+            });
+          } else {
+            setLoadingProgress((prev) => ({
+              loaded,
+              total: 0,
+              percent: prev ? Math.min(90, prev.percent + 15) : 35,
+              message: 'Cargando libro...',
+            }));
+          }
+        };
 
         const doc = await loadingTask.promise;
         setPdfDoc(doc);
@@ -191,15 +222,16 @@ export default function App() {
         }
         setCurrentPage(1);
         setTotalPages(doc.numPages);
-        setIsLoading(false);
 
-        // Switch immediately to viewer mode
+        // Switch immediately to viewer mode so page 1 renders without delay
         setViewMode('viewer');
+        setIsLoading(false);
+        setLoadingProgress(null);
 
         // Auto calculate fit-width
         setTimeout(() => {
           fitWidth(doc);
-        }, 60);
+        }, 50);
 
         return doc;
       } catch (err: unknown) {
@@ -208,6 +240,7 @@ export default function App() {
           'No se pudo procesar el archivo PDF. Asegúrate de que sea un archivo PDF válido y sin clave.'
         );
         setIsLoading(false);
+        setLoadingProgress(null);
         return null;
       }
     },
@@ -223,13 +256,15 @@ export default function App() {
       if (lastId && records.length > 0) {
         const lastRecord = await getPdfRecordFromDb(lastId);
         if (lastRecord && lastRecord.arrayBuffer) {
-          // Pre-load but keep on Home view until user clicks "Continuar leyendo" or chooses to
+          // Pre-load with lazy loading
           const bufferCopy = lastRecord.arrayBuffer.slice(0);
           try {
             const loadingTask = pdfjsLib.getDocument({
               data: new Uint8Array(bufferCopy),
               cMapUrl: 'https://unpkg.com/pdfjs-dist@legacy/cmaps/',
               cMapPacked: true,
+              disableAutoFetch: true,
+              disableStream: false,
             });
             const doc = await loadingTask.promise;
             setPdfDoc(doc);
@@ -246,8 +281,7 @@ export default function App() {
   }, [refreshStoredRecords]);
 
   /**
-   * Real PDF File Loader via FileReader and immediate IndexedDB Persistence
-   * Guaranteed: Saves before/during rendering and refreshes history instantly.
+   * Real PDF File Loader via FileReader and background IndexedDB Persistence
    */
   const handleFileUpload = useCallback(
     (file: File) => {
@@ -259,6 +293,7 @@ export default function App() {
       }
 
       setIsLoading(true);
+      setLoadingProgress({ loaded: 0, total: file.size, percent: 10, message: 'Cargando libro...' });
       setErrorMessage(null);
 
       const reader = new FileReader();
@@ -268,62 +303,38 @@ export default function App() {
         if (!buffer || buffer.byteLength === 0) {
           setErrorMessage('No se pudo leer el contenido del archivo.');
           setIsLoading(false);
+          setLoadingProgress(null);
           return;
         }
 
         const id = `pdf_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
-        // Generate base64 backup safely
-        let dataBase64 = '';
-        try {
-          dataBase64 = arrayBufferToBase64(buffer);
-        } catch (b64Err) {
-          console.warn('Base64 conversion failed:', b64Err);
-        }
-
-        // 1. First, save to IndexedDB immediately with cloned buffer
-        try {
-          const record: StoredPdfRecord = {
-            id,
-            name: file.name,
-            size: file.size,
-            uploadDate: new Date().toISOString(),
-            totalPages: 1, // updated once doc is loaded
-            arrayBuffer: buffer.slice(0),
-            dataBase64: dataBase64 || undefined,
-          };
-          await savePdfToDb(record);
-          await refreshStoredRecords();
-        } catch (dbErr) {
-          console.error('Error saving to IndexedDB:', dbErr);
-        }
-
-        // 2. Load into PDF viewer
+        // 1. Immediately start PDF lazy loading and render page 1 without waiting for DB writes
         const doc = await loadPdfFromArrayBuffer(buffer.slice(0), file.name, id);
 
-        if (doc) {
-          // Update totalPages in IndexedDB
+        // 2. Persist to IndexedDB asynchronously in the background so the main thread never freezes
+        setTimeout(async () => {
           try {
-            const updatedRecord: StoredPdfRecord = {
+            const record: StoredPdfRecord = {
               id,
               name: file.name,
               size: file.size,
               uploadDate: new Date().toISOString(),
-              totalPages: doc.numPages,
+              totalPages: doc ? doc.numPages : 1,
               arrayBuffer: buffer.slice(0),
-              dataBase64: dataBase64 || undefined,
             };
-            await savePdfToDb(updatedRecord);
+            await savePdfToDb(record);
             await refreshStoredRecords();
-          } catch {
-            // ignore
+          } catch (dbErr) {
+            console.warn('Background save to IndexedDB failed:', dbErr);
           }
-        }
+        }, 80);
       };
 
       reader.onerror = () => {
         setErrorMessage('Error al leer el archivo desde el dispositivo.');
         setIsLoading(false);
+        setLoadingProgress(null);
       };
 
       reader.readAsArrayBuffer(file);
@@ -547,6 +558,46 @@ export default function App() {
           </>
         )}
       </main>
+
+      {/* Prominent Progressive Loading Overlay (Loader para libros pesados) */}
+      {isLoading && (
+        <div className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in pointer-events-auto">
+          <div className="w-full max-w-sm rounded-3xl bg-[#111827] border border-[#334155]/90 p-6 shadow-2xl flex flex-col items-center text-center">
+            <div className="relative mb-4">
+              <div className="w-14 h-14 rounded-full border-4 border-[#334155] border-t-[#f59e0b] animate-spin" />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="w-4 h-4 rounded-full bg-[#f59e0b]/40 animate-pulse" />
+              </div>
+            </div>
+
+            <h3 className="text-base sm:text-lg font-bold font-['Space_Grotesk'] text-[#dfe2ee] tracking-tight">
+              Cargando libro...
+            </h3>
+            <p className="text-xs text-[#94a3b8] mt-1 line-clamp-1 max-w-[280px]">
+              {fileName || 'Leyendo estructura general del PDF...'}
+            </p>
+
+            {/* Animated Progress Bar */}
+            <div className="w-full bg-[#1e293b] rounded-full h-2 overflow-hidden mt-4 mb-2">
+              <div
+                className="bg-gradient-to-r from-[#f59e0b] via-[#fbbf24] to-[#4cd7f6] h-full transition-all duration-300 rounded-full"
+                style={{ width: `${loadingProgress?.percent || 35}%` }}
+              />
+            </div>
+
+            <div className="w-full flex justify-between items-center text-[11px] font-['JetBrains_Mono'] text-[#94a3b8]">
+              <span>Progreso</span>
+              <span className="text-[#f59e0b] font-medium">
+                {loadingProgress?.percent || 35}%
+              </span>
+            </div>
+
+            <span className="text-[10px] text-[#64748b] mt-3 tracking-wide">
+              Renderizado bajo demanda activo: la primera página se mostrará de inmediato.
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* History & Library Drawer (accessible from header button anytime) */}
       <HistoryDrawer

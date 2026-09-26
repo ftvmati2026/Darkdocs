@@ -38,6 +38,9 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
   // Active rendering tasks
   const currentRenderTaskRef = useRef<RenderTask | null>(null);
+  const prefetchNextTaskRef = useRef<RenderTask | null>(null);
+  const prefetchPrevTaskRef = useRef<RenderTask | null>(null);
+  const prevPageRef = useRef<number>(currentPage);
 
   // Page dimensions & rendering state
   const [isRendering, setIsRendering] = useState(false);
@@ -102,7 +105,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   }, [containerRef, onAutoFit]);
 
   /**
-   * Render a specific PDF page onto a target canvas element
+   * Render a specific PDF page onto a target canvas element asynchronously with memory cleanup
    */
   const renderPdfPageToCanvas = useCallback(
     async (
@@ -113,8 +116,9 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     ): Promise<boolean> => {
       if (!pdfDoc || pageNum < 1 || pageNum > pdfDoc.numPages) return false;
 
+      let page: any = null;
       try {
-        const page = await pdfDoc.getPage(pageNum);
+        page = await pdfDoc.getPage(pageNum);
         const viewport = page.getViewport({ scale });
 
         const context = targetCanvas.getContext('2d', { alpha: false });
@@ -146,8 +150,21 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
         if (abortTaskHolder) {
           abortTaskHolder.current = null;
         }
+
+        // Release memory allocated by pdf.js for glyphs, image bitmaps, and operator lists:
+        if (page && typeof page.cleanup === 'function') {
+          page.cleanup();
+        }
+
         return true;
       } catch (err: unknown) {
+        if (page && typeof page.cleanup === 'function') {
+          try {
+            page.cleanup();
+          } catch {
+            // ignore
+          }
+        }
         if (
           err &&
           typeof err === 'object' &&
@@ -163,7 +180,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   );
 
   /**
-   * Main page render effect: Renders current page and pre-renders adjacent pages in background
+   * Main page render effect: Renders current page immediately and pre-renders adjacent pages lazily
    */
   useEffect(() => {
     let isCancelled = false;
@@ -171,6 +188,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     const doRender = async () => {
       if (!pdfDoc || !currentCanvasRef.current) return;
 
+      // Cancel any ongoing tasks from previous page requests
       if (currentRenderTaskRef.current) {
         try {
           currentRenderTaskRef.current.cancel();
@@ -179,16 +197,53 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
         }
         currentRenderTaskRef.current = null;
       }
+      if (prefetchNextTaskRef.current) {
+        try {
+          prefetchNextTaskRef.current.cancel();
+        } catch {
+          // ignore
+        }
+        prefetchNextTaskRef.current = null;
+      }
+      if (prefetchPrevTaskRef.current) {
+        try {
+          prefetchPrevTaskRef.current.cancel();
+        } catch {
+          // ignore
+        }
+        prefetchPrevTaskRef.current = null;
+      }
+
+      // If user jumped across pages (not an adjacent flip), reset cached canvases to free memory
+      if (Math.abs(currentPage - prevPageRef.current) > 1) {
+        if (cachedNextCanvasRef.current) {
+          cachedNextCanvasRef.current.width = 1;
+          cachedNextCanvasRef.current.height = 1;
+        }
+        if (cachedPrevCanvasRef.current) {
+          cachedPrevCanvasRef.current.width = 1;
+          cachedPrevCanvasRef.current.height = 1;
+        }
+      }
+      prevPageRef.current = currentPage;
 
       try {
         setIsRendering(true);
         setRenderError(null);
 
+        // 1. Fetch current page structure and calculate viewport
         const page = await pdfDoc.getPage(currentPage);
-        if (isCancelled) return;
+        if (isCancelled) {
+          if (page && typeof page.cleanup === 'function') page.cleanup();
+          return;
+        }
         const viewport = page.getViewport({ scale: zoom });
         setPageSize({ width: viewport.width, height: viewport.height });
+        if (page && typeof page.cleanup === 'function') {
+          page.cleanup();
+        }
 
+        // 2. Render active page immediately
         const success = await renderPdfPageToCanvas(
           currentPage,
           currentCanvasRef.current,
@@ -201,21 +256,35 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
         if (success) {
           setIsRendering(false);
 
-          // Pre-render adjacent pages into hidden buffer canvases
-          if (cachedNextCanvasRef.current && currentPage < pdfDoc.numPages) {
-            renderPdfPageToCanvas(
-              currentPage + 1,
-              cachedNextCanvasRef.current,
-              zoom
-            );
+          // Flush unreferenced page resources in pdf.js
+          if (typeof pdfDoc.cleanup === 'function') {
+            try {
+              pdfDoc.cleanup();
+            } catch {
+              // ignore
+            }
           }
-          if (cachedPrevCanvasRef.current && currentPage > 1) {
-            renderPdfPageToCanvas(
-              currentPage - 1,
-              cachedPrevCanvasRef.current,
-              zoom
-            );
-          }
+
+          // 3. Lazily pre-render ONLY adjacent pages (N+1 and N-1) with lower priority
+          setTimeout(() => {
+            if (isCancelled) return;
+            if (cachedNextCanvasRef.current && currentPage < pdfDoc.numPages) {
+              renderPdfPageToCanvas(
+                currentPage + 1,
+                cachedNextCanvasRef.current,
+                zoom,
+                prefetchNextTaskRef
+              );
+            }
+            if (cachedPrevCanvasRef.current && currentPage > 1) {
+              renderPdfPageToCanvas(
+                currentPage - 1,
+                cachedPrevCanvasRef.current,
+                zoom,
+                prefetchPrevTaskRef
+              );
+            }
+          }, 80);
         }
       } catch (err) {
         if (!isCancelled) {
@@ -233,6 +302,20 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
       if (currentRenderTaskRef.current) {
         try {
           currentRenderTaskRef.current.cancel();
+        } catch {
+          // ignore
+        }
+      }
+      if (prefetchNextTaskRef.current) {
+        try {
+          prefetchNextTaskRef.current.cancel();
+        } catch {
+          // ignore
+        }
+      }
+      if (prefetchPrevTaskRef.current) {
+        try {
+          prefetchPrevTaskRef.current.cancel();
         } catch {
           // ignore
         }
@@ -916,10 +999,15 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
           {/* Loading spinner overlay */}
           {isRendering && (
-            <div className="absolute inset-0 bg-[#0a0e16]/30 backdrop-blur-[1px] flex items-center justify-center pointer-events-none z-40">
-              <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-[#111827]/90 border border-[#334155]/60 text-xs font-['JetBrains_Mono'] text-[#f59e0b] shadow-lg">
-                <div className="w-3 h-3 border-2 border-[#f59e0b] border-t-transparent rounded-full animate-spin" />
-                <span>Cargando pág. {currentPage}...</span>
+            <div className="absolute inset-0 bg-[#0a0e16]/50 backdrop-blur-[2px] flex items-center justify-center pointer-events-none z-40 transition-opacity">
+              <div className="flex flex-col items-center gap-2 px-5 py-3 rounded-2xl bg-[#111827]/95 border border-[#334155]/80 text-xs font-['JetBrains_Mono'] text-[#f59e0b] shadow-[0_12px_32px_rgba(0,0,0,0.85)] text-center animate-fade-in">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-4 h-4 border-2 border-[#f59e0b] border-t-transparent rounded-full animate-spin" />
+                  <span className="font-semibold">Cargando libro...</span>
+                </div>
+                <span className="text-[11px] text-[#94a3b8]">
+                  Página {currentPage} de {pdfDoc?.numPages || 1}
+                </span>
               </div>
             </div>
           )}
