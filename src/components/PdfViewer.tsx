@@ -30,11 +30,15 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 }) => {
   // Main canvas refs
   const currentCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const currentImageCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const targetCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const targetImageCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Hidden background pre-render buffer canvases for instant reveal
   const cachedNextCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const cachedNextImageCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const cachedPrevCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const cachedPrevImageCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Active rendering tasks
   const currentRenderTaskRef = useRef<RenderTask | null>(null);
@@ -106,17 +110,21 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
   /**
    * Render a specific PDF page onto a target canvas element asynchronously with memory cleanup
+   * Also captures all images/photos/illustrations onto imageCanvas for smart dark mode re-inversion
    */
   const renderPdfPageToCanvas = useCallback(
     async (
       pageNum: number,
       targetCanvas: HTMLCanvasElement,
       scale: number,
-      abortTaskHolder?: React.MutableRefObject<RenderTask | null>
+      abortTaskHolder?: React.MutableRefObject<RenderTask | null>,
+      imageCanvas?: HTMLCanvasElement | null
     ): Promise<boolean> => {
       if (!pdfDoc || pageNum < 1 || pageNum > pdfDoc.numPages) return false;
 
       let page: any = null;
+      let restoreDrawImage: (() => void) | null = null;
+
       try {
         page = await pdfDoc.getPage(pageNum);
         const viewport = page.getViewport({ scale });
@@ -125,11 +133,46 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
         if (!context) return false;
 
         const pixelRatio = window.devicePixelRatio || 1;
-        targetCanvas.width = Math.floor(viewport.width * pixelRatio);
-        targetCanvas.height = Math.floor(viewport.height * pixelRatio);
+        const targetW = Math.floor(viewport.width * pixelRatio);
+        const targetH = Math.floor(viewport.height * pixelRatio);
 
+        targetCanvas.width = targetW;
+        targetCanvas.height = targetH;
         targetCanvas.style.width = `${Math.floor(viewport.width)}px`;
         targetCanvas.style.height = `${Math.floor(viewport.height)}px`;
+
+        // Configure image overlay canvas for Smart Dark Mode
+        if (imageCanvas) {
+          imageCanvas.width = targetW;
+          imageCanvas.height = targetH;
+          imageCanvas.style.width = `${Math.floor(viewport.width)}px`;
+          imageCanvas.style.height = `${Math.floor(viewport.height)}px`;
+          const imageCtx = imageCanvas.getContext('2d');
+          if (imageCtx) {
+            imageCtx.clearRect(0, 0, targetW, targetH);
+
+            const origDrawImage = context.drawImage;
+            // Intercept image drawing to replicate photos/illustrations onto imageCanvas
+            context.drawImage = function (this: any, ...args: any[]) {
+              try {
+                if (context.getTransform && imageCtx.setTransform) {
+                  imageCtx.setTransform(context.getTransform());
+                }
+                imageCtx.globalAlpha = context.globalAlpha;
+                imageCtx.globalCompositeOperation = context.globalCompositeOperation;
+                // @ts-ignore
+                imageCtx.drawImage(...args);
+              } catch {
+                // ignore
+              }
+              return origDrawImage.apply(this, args as any);
+            } as any;
+
+            restoreDrawImage = () => {
+              context.drawImage = origDrawImage;
+            };
+          }
+        }
 
         const transform =
           pixelRatio !== 1 ? [pixelRatio, 0, 0, pixelRatio, 0, 0] : undefined;
@@ -151,6 +194,11 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
           abortTaskHolder.current = null;
         }
 
+        if (restoreDrawImage) {
+          restoreDrawImage();
+          restoreDrawImage = null;
+        }
+
         // Release memory allocated by pdf.js for glyphs, image bitmaps, and operator lists:
         if (page && typeof page.cleanup === 'function') {
           page.cleanup();
@@ -158,6 +206,10 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
         return true;
       } catch (err: unknown) {
+        if (restoreDrawImage) {
+          restoreDrawImage();
+          restoreDrawImage = null;
+        }
         if (page && typeof page.cleanup === 'function') {
           try {
             page.cleanup();
@@ -220,9 +272,17 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
           cachedNextCanvasRef.current.width = 1;
           cachedNextCanvasRef.current.height = 1;
         }
+        if (cachedNextImageCanvasRef.current) {
+          cachedNextImageCanvasRef.current.width = 1;
+          cachedNextImageCanvasRef.current.height = 1;
+        }
         if (cachedPrevCanvasRef.current) {
           cachedPrevCanvasRef.current.width = 1;
           cachedPrevCanvasRef.current.height = 1;
+        }
+        if (cachedPrevImageCanvasRef.current) {
+          cachedPrevImageCanvasRef.current.width = 1;
+          cachedPrevImageCanvasRef.current.height = 1;
         }
       }
       prevPageRef.current = currentPage;
@@ -243,12 +303,13 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
           page.cleanup();
         }
 
-        // 2. Render active page immediately
+        // 2. Render active page immediately with dedicated image layer
         const success = await renderPdfPageToCanvas(
           currentPage,
           currentCanvasRef.current,
           zoom,
-          currentRenderTaskRef
+          currentRenderTaskRef,
+          currentImageCanvasRef.current
         );
 
         if (isCancelled) return;
@@ -273,7 +334,8 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
                 currentPage + 1,
                 cachedNextCanvasRef.current,
                 zoom,
-                prefetchNextTaskRef
+                prefetchNextTaskRef,
+                cachedNextImageCanvasRef.current
               );
             }
             if (cachedPrevCanvasRef.current && currentPage > 1) {
@@ -281,7 +343,8 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
                 currentPage - 1,
                 cachedPrevCanvasRef.current,
                 zoom,
-                prefetchPrevTaskRef
+                prefetchPrevTaskRef,
+                cachedPrevImageCanvasRef.current
               );
             }
           }, 80);
@@ -405,14 +468,16 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
       if (isForward) {
         if (cachedNextCanvasRef.current && toPage === currentPage + 1) {
           copyCanvasContent(cachedNextCanvasRef.current, targetCanvasRef.current);
+          copyCanvasContent(cachedNextImageCanvasRef.current, targetImageCanvasRef.current);
         } else if (targetCanvasRef.current) {
-          renderPdfPageToCanvas(toPage, targetCanvasRef.current, zoom);
+          renderPdfPageToCanvas(toPage, targetCanvasRef.current, zoom, undefined, targetImageCanvasRef.current);
         }
       } else {
         if (cachedPrevCanvasRef.current && toPage === currentPage - 1) {
           copyCanvasContent(cachedPrevCanvasRef.current, targetCanvasRef.current);
+          copyCanvasContent(cachedPrevImageCanvasRef.current, targetImageCanvasRef.current);
         } else if (targetCanvasRef.current) {
-          renderPdfPageToCanvas(toPage, targetCanvasRef.current, zoom);
+          renderPdfPageToCanvas(toPage, targetCanvasRef.current, zoom, undefined, targetImageCanvasRef.current);
         }
       }
 
@@ -525,14 +590,16 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
         if (isForward) {
           if (cachedNextCanvasRef.current && nextP === currentPage + 1) {
             copyCanvasContent(cachedNextCanvasRef.current, targetCanvasRef.current);
+            copyCanvasContent(cachedNextImageCanvasRef.current, targetImageCanvasRef.current);
           } else if (targetCanvasRef.current) {
-            renderPdfPageToCanvas(nextP, targetCanvasRef.current, zoom);
+            renderPdfPageToCanvas(nextP, targetCanvasRef.current, zoom, undefined, targetImageCanvasRef.current);
           }
         } else {
           if (cachedPrevCanvasRef.current && nextP === currentPage - 1) {
             copyCanvasContent(cachedPrevCanvasRef.current, targetCanvasRef.current);
+            copyCanvasContent(cachedPrevImageCanvasRef.current, targetImageCanvasRef.current);
           } else if (targetCanvasRef.current) {
-            renderPdfPageToCanvas(nextP, targetCanvasRef.current, zoom);
+            renderPdfPageToCanvas(nextP, targetCanvasRef.current, zoom, undefined, targetImageCanvasRef.current);
           }
         }
 
@@ -673,14 +740,6 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   const textTint = getTextTintOverlay();
   const bgTint = getBackgroundTintOverlay();
 
-  // Smart Dark Mode filter: preserves hues & skin tones of images while inverting paper and text
-  const getCanvasFilter = () => {
-    if (!isDarkMode) return 'none';
-    const contrastVal = (1.1 * (visualSettings.textContrast || 1.0)).toFixed(2);
-    const brightnessVal = visualSettings.backgroundIntensity || 1.0;
-    return `invert(0.9) hue-rotate(180deg) contrast(${contrastVal}) brightness(${brightnessVal})`;
-  };
-
   // Effective peel progress (accounting for hover hint: ~0.11 when hovered)
   const activePeel =
     peelProgress > 0
@@ -773,7 +832,9 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
       {/* Hidden background pre-render buffer canvases */}
       <div className="hidden" aria-hidden="true">
         <canvas ref={cachedNextCanvasRef} />
+        <canvas ref={cachedNextImageCanvasRef} />
         <canvas ref={cachedPrevCanvasRef} />
+        <canvas ref={cachedPrevImageCanvasRef} />
       </div>
 
       {/* Render error fallback if any */}
@@ -834,18 +895,29 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
         >
           {/* LAYER 1: BASE / REVEALED TARGET PAGE (visible through cutaway corner) */}
           <div
-            className="absolute inset-0 rounded-lg sm:rounded-xl overflow-hidden pointer-events-none"
+            className={`absolute inset-0 rounded-lg sm:rounded-xl overflow-hidden pointer-events-none pdf-page-canvas-wrapper ${
+              isDarkMode ? 'dark-mode' : ''
+            }`}
             style={{
               display: isCurlVisible ? 'block' : 'none',
               backgroundColor: getContainerBg(),
             }}
           >
+            {/* Base Canvas: Text, Vectors, Background (Inverted via CSS class .dark-mode without inline style) */}
             <canvas
               ref={targetCanvasRef}
-              className="block mx-auto max-w-full h-auto"
+              className="pdf-page-canvas block mx-auto max-w-full h-auto"
               style={{
-                filter: getCanvasFilter(),
                 backgroundColor: '#ffffff',
+              }}
+            />
+
+            {/* Dedicated Image Layer: Photos, illustrations, graphics (Re-inverted via .dark-mode canvas.image-layer to restore true original colors) */}
+            <canvas
+              ref={targetImageCanvasRef}
+              className="image-layer pdf-image absolute inset-0 block mx-auto max-w-full h-auto pointer-events-none"
+              style={{
+                display: isDarkMode ? 'block' : 'none',
               }}
             />
 
@@ -865,19 +937,30 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
           {/* LAYER 2: CURRENT ACTIVE PAGE (with dynamic corner cutaway clip) */}
           <div
-            className="relative rounded-lg sm:rounded-xl overflow-hidden pointer-events-none"
+            className={`relative rounded-lg sm:rounded-xl overflow-hidden pointer-events-none pdf-page-canvas-wrapper ${
+              isDarkMode ? 'dark-mode' : ''
+            }`}
             style={{
               backgroundColor: getContainerBg(),
               clipPath: isCurlVisible ? clipPolygon : undefined,
               WebkitClipPath: isCurlVisible ? clipPolygon : undefined,
             }}
           >
+            {/* Base Canvas: Text, Vectors, Background (Inverted via CSS class .dark-mode without inline style) */}
             <canvas
               ref={currentCanvasRef}
-              className="block mx-auto max-w-full h-auto transition-[filter] duration-200"
+              className="pdf-page-canvas block mx-auto max-w-full h-auto transition-[filter] duration-200"
               style={{
-                filter: getCanvasFilter(),
                 backgroundColor: '#ffffff',
+              }}
+            />
+
+            {/* Dedicated Image Layer: Photos, illustrations, graphics (Re-inverted via .dark-mode canvas.image-layer to restore true original colors) */}
+            <canvas
+              ref={currentImageCanvasRef}
+              className="image-layer pdf-image absolute inset-0 block mx-auto max-w-full h-auto pointer-events-none"
+              style={{
+                display: isDarkMode ? 'block' : 'none',
               }}
             />
 

@@ -12,9 +12,24 @@
   }
 }
 
-/* Smart Dark Mode: Preserved color tone inversion to avoid negative photo effects */
-.dark-pdf-inverted {
-  filter: invert(0.9) hue-rotate(180deg) contrast(1.1);
+/* =========================================================
+   Smart Dark Mode: Re-inversión CSS de Elementos Gráficos
+   ========================================================= */
+
+/* Cuando el modo oscuro está activo, aplica el filtro a la capa del contenedor */
+.dark-mode.pdf-page-container,
+.dark-mode .pdf-page-canvas-wrapper,
+.dark-mode.pdf-page-canvas-wrapper,
+.dark-mode .pdf-canvas-layer {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* CRÍTICO: Para que las imágenes no queden en negativo, re-inversión obligatoria */
+.dark-mode img, 
+.dark-mode canvas.image-layer,
+.dark-mode .pdf-image,
+.dark-mode svg.image-layer {
+  filter: invert(1) hue-rotate(180deg) !important;
 }
 
 /* Custom scrollbar for document container */
