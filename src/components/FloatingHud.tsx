@@ -55,7 +55,7 @@ export const FloatingHud: React.FC<FloatingHudProps> = ({
           type="button"
           onClick={onToggleDarkMode}
           className="flex items-center gap-1.5 hover:opacity-80 transition-opacity cursor-pointer text-xs"
-          title="Alternar modo invertido"
+          title={isDarkMode ? 'Modo Oscuro Inteligente Activo' : 'Modo Original'}
         >
           <Eye className={`w-3.5 h-3.5 ${isDarkMode ? 'text-[#56e5a9]' : 'text-[#94a3b8]'}`} />
           <span
@@ -63,7 +63,7 @@ export const FloatingHud: React.FC<FloatingHudProps> = ({
               isDarkMode ? 'text-[#56e5a9]' : 'text-[#94a3b8]'
             }`}
           >
-            {isDarkMode ? 'Invertido' : 'Original'}
+            {isDarkMode ? 'Modo Oscuro' : 'Original'}
           </span>
         </button>
 

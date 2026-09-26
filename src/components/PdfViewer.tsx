@@ -673,6 +673,14 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   const textTint = getTextTintOverlay();
   const bgTint = getBackgroundTintOverlay();
 
+  // Smart Dark Mode filter: preserves hues & skin tones of images while inverting paper and text
+  const getCanvasFilter = () => {
+    if (!isDarkMode) return 'none';
+    const contrastVal = (1.1 * (visualSettings.textContrast || 1.0)).toFixed(2);
+    const brightnessVal = visualSettings.backgroundIntensity || 1.0;
+    return `invert(0.9) hue-rotate(180deg) contrast(${contrastVal}) brightness(${brightnessVal})`;
+  };
+
   // Effective peel progress (accounting for hover hint: ~0.11 when hovered)
   const activePeel =
     peelProgress > 0
@@ -836,9 +844,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
               ref={targetCanvasRef}
               className="block mx-auto max-w-full h-auto"
               style={{
-                filter: isDarkMode
-                  ? `invert(1) hue-rotate(180deg) brightness(${visualSettings.backgroundIntensity}) contrast(${visualSettings.textContrast})`
-                  : 'none',
+                filter: getCanvasFilter(),
                 backgroundColor: '#ffffff',
               }}
             />
@@ -870,9 +876,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
               ref={currentCanvasRef}
               className="block mx-auto max-w-full h-auto transition-[filter] duration-200"
               style={{
-                filter: isDarkMode
-                  ? `invert(1) hue-rotate(180deg) brightness(${visualSettings.backgroundIntensity}) contrast(${visualSettings.textContrast})`
-                  : 'none',
+                filter: getCanvasFilter(),
                 backgroundColor: '#ffffff',
               }}
             />
